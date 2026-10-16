@@ -15,8 +15,9 @@ services:
     profiles: ["gpu"]
     build: ./trainer
     ports:
-      - "8090:8090"
+      - "8010:8010"
     environment:
+      PORT: "8010"
       CHECKPOINT: /checkpoints/policy.pt
       VRAM_BUDGET_GB: "2.5"
     volumes:

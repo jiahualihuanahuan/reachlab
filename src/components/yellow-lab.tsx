@@ -133,7 +133,7 @@ export function YellowLab() {
       if (saved.url && saved.url !== "http://127.0.0.1:11434") setUrl(saved.url);
       if (saved.model) setModel(saved.model);
       if (saved.elites) setElites(saved.elites);
-      if (saved.trainer) setTrainerUrl(saved.trainer);
+      if (saved.trainer && saved.trainer !== "http://192.168.86.35:8090") setTrainerUrl(saved.trainer);
     } catch {
       /* ignore a bad save */
     }

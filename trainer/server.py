@@ -256,7 +256,7 @@ def main() -> None:
     n = param_count(model)
     cap = f"{vram_cap / 1024**2:.0f} MB cap" if device.type == "cuda" else "cpu"
     print(f"[trainer] {gpu_name} width {width} params {n/1e6:.1f}M {cap}")
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8090")), log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8010")), log_level="info")
 
 
 if __name__ == "__main__":

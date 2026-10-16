@@ -1,4 +1,4 @@
-export const TRAINER = "http://192.168.86.35:8090";
+export const TRAINER = "http://192.168.86.35:8010";
 
 export type GpuHealth = {
   ok: boolean;

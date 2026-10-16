@@ -18,7 +18,7 @@ Open http://localhost:8080.
 
 - `web` serves the lab on port 8080 and reads `/roms/yellow.gbc`.
 - The guide defaults to `http://192.168.86.35:11434` and model `qwen3.5:9b`. That server is only queried. Start it with `OLLAMA_ORIGINS=*` so the browser may call it.
-- The trained policy is not in the browser. On the 3080 machine, start the trainer (below). The page defaults to `http://192.168.86.35:8090`.
+- The trained policy is not in the browser. On the 3080 machine, start the trainer (below). The page defaults to `http://192.168.86.35:8010`.
 
 No database. The small fallback net stays in the browser (`localStorage` key `reachlab-yellow-v1`). The GPU policy is stored on the 3080 in the trainer checkpoint. `qwen3.5:9b` is not modified.
 

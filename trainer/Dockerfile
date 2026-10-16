@@ -6,5 +6,5 @@ COPY model.py server.py ./
 ENV CHECKPOINT=/checkpoints/policy.pt
 ENV VRAM_BUDGET_GB=2.5
 VOLUME /checkpoints
-EXPOSE 8090
+EXPOSE 8010
 CMD ["python", "server.py"]
