@@ -245,8 +245,14 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self) -> None:
-        if self.path.split("?", 1)[0] == "/health":
+        path = self.path.split("?", 1)[0]
+        if path in ("/health", "/"):
             self._send(200, health())
+        elif path == "/favicon.ico":
+            self.send_response(204)
+            self._cors()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
         else:
             self._send(404, {"error": "not found"})
 

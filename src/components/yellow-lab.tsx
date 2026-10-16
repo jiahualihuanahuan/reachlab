@@ -736,11 +736,7 @@ export function YellowLab() {
                 />
               </label>
               <p className="text-paper-dim">
-                The browser was sending HTTPS. Open{" "}
-                <a className="text-amber underline" href={trainerUrl + "/health"} target="_blank" rel="noreferrer">
-                  {trainerUrl}/health
-                </a>{" "}
-                once and choose Continue on the certificate warning. Then come back and leave GPU on.
+                Leave this running. The page tries HTTPS, and if the certificate is refused it uses HTTP, which already answered from your browser.
               </p>
               <label className="block text-xs text-sage">
                 Ollama URL

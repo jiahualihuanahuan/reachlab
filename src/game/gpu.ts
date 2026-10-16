@@ -35,9 +35,33 @@ function base(url: string) {
   return url.replace(/\/$/, "");
 }
 
+function candidates(url: string) {
+  const root = base(url);
+  if (root.startsWith("https://")) return [root, `http://${root.slice("https://".length)}`];
+  return [root];
+}
+
+let working = "";
+
+async function call(url: string, path: string, init?: RequestInit) {
+  const options = candidates(url);
+  const order = working && options.some((item) => item === working) ? [working, ...options.filter((item) => item !== working)] : options;
+  let last = "trainer unreachable";
+  for (const root of order) {
+    try {
+      const res = await fetch(`${root}${path}`, init);
+      working = root;
+      return res;
+    } catch (err) {
+      last = err instanceof Error ? err.message : "trainer unreachable";
+    }
+  }
+  throw new Error(last);
+}
+
 export async function gpuHealth(url: string): Promise<GpuHealth | null> {
   try {
-    const res = await fetch(`${base(url)}/health`, { signal: AbortSignal.timeout(1500) });
+    const res = await call(url, "/health", { signal: AbortSignal.timeout(2500) });
     if (!res.ok) return null;
     return (await res.json()) as GpuHealth;
   } catch {
@@ -46,7 +70,7 @@ export async function gpuHealth(url: string): Promise<GpuHealth | null> {
 }
 
 export async function gpuAct(url: string, obs: number[], hidden: number[] | null): Promise<GpuSample> {
-  const res = await fetch(`${base(url)}/act`, {
+  const res = await call(url, "/act", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ obs, hidden }),
@@ -56,7 +80,7 @@ export async function gpuAct(url: string, obs: number[], hidden: number[] | null
 }
 
 export async function gpuUpdate(url: string, roll: GpuRollout): Promise<{ updates: number; entropy: number }> {
-  const res = await fetch(`${base(url)}/update`, {
+  const res = await call(url, "/update", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(roll),
@@ -67,7 +91,7 @@ export async function gpuUpdate(url: string, roll: GpuRollout): Promise<{ update
 
 export async function gpuReset(url: string) {
   try {
-    await fetch(`${base(url)}/reset`, { method: "POST" });
+    await call(url, "/reset", { method: "POST" });
   } catch {
     /* trainer can be offline */
   }
