@@ -1,15 +1,17 @@
-"""PPO trainer for the Reachlab policy. Caps CUDA use so qwen3.5:9b can stay resident."""
+"""PPO trainer for the Reachlab policy. Caps CUDA use so qwen3.5:9b can stay resident.
 
+The HTTP server is the standard library, so Python 3.14 does not need Pydantic.
+The only install is PyTorch.
+"""
+
+import json
 import os
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
 
 import torch
 import torch.nn.functional as F
-import uvicorn
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
 
 from model import Policy, param_count
 
@@ -26,14 +28,6 @@ CHECKPOINT = os.environ.get(
     os.path.join(os.path.dirname(__file__), "checkpoints", "policy.pt"),
 )
 
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 lock = threading.Lock()
 device = torch.device("cpu")
 model: Policy
@@ -42,22 +36,6 @@ updates = 0
 vram_cap = 0
 gpu_name = "cpu"
 save_ok = True
-
-
-class ActIn(BaseModel):
-    obs: list[float] = Field(min_length=OBS, max_length=OBS)
-    hidden: Optional[list[float]] = None
-
-
-class UpdateIn(BaseModel):
-    obs: list[list[float]]
-    actions: list[int]
-    logp: list[float]
-    values: list[float]
-    rewards: list[float]
-    dones: list[bool]
-    h0: Optional[list[float]] = None
-    bootstrap: float
 
 
 def estimate_bytes(width: int) -> int:
@@ -98,8 +76,7 @@ def hidden_tensor(values: Optional[list[float]], width: int) -> Optional[torch.T
         return None
     if len(values) != width:
         return None
-    t = torch.tensor(values, dtype=torch.float32, device=device).view(1, 1, width)
-    return t
+    return torch.tensor(values, dtype=torch.float32, device=device).view(1, 1, width)
 
 
 def save() -> None:
@@ -145,7 +122,6 @@ def apply_checkpoint() -> None:
     print(f"[trainer] restored {updates} updates from {CHECKPOINT}")
 
 
-@app.get("/health")
 def health():
     free = total = 0
     if device.type == "cuda":
@@ -163,11 +139,13 @@ def health():
     }
 
 
-@app.post("/act")
-def act(body: ActIn):
-    obs = torch.tensor(body.obs, dtype=torch.float32, device=device).view(1, OBS)
+def act(body: dict):
+    obs_list = body.get("obs")
+    if not isinstance(obs_list, list) or len(obs_list) != OBS:
+        raise ValueError("obs must be 32 numbers")
+    obs = torch.tensor(obs_list, dtype=torch.float32, device=device).view(1, OBS)
     with lock, torch.no_grad():
-        hidden = hidden_tensor(body.hidden, model.width)
+        hidden = hidden_tensor(body.get("hidden"), model.width)
         logits, value, hidden_out = model.forward_step(obs, hidden)
         probs = torch.softmax(logits, dim=-1)
         dist = torch.distributions.Categorical(probs=probs)
@@ -183,24 +161,26 @@ def act(body: ActIn):
     }
 
 
-@app.post("/update")
-def update(body: UpdateIn):
+def update(body: dict):
     global updates
-    n = len(body.actions)
-    if n < 4 or len(body.obs) != n:
+    actions_list = body.get("actions") or []
+    obs_list = body.get("obs") or []
+    n = len(actions_list)
+    if n < 4 or len(obs_list) != n:
         return {"updates": updates, "entropy": 0.0}
-    obs = torch.tensor(body.obs, dtype=torch.float32, device=device)
-    actions = torch.tensor(body.actions, dtype=torch.long, device=device)
-    old_logp = torch.tensor(body.logp, dtype=torch.float32, device=device)
-    old_values = torch.tensor(body.values, dtype=torch.float32, device=device)
-    rewards = torch.tensor(body.rewards, dtype=torch.float32, device=device)
-    dones = torch.tensor(body.dones, dtype=torch.float32, device=device)
+    obs = torch.tensor(obs_list, dtype=torch.float32, device=device)
+    actions = torch.tensor(actions_list, dtype=torch.long, device=device)
+    old_logp = torch.tensor(body["logp"], dtype=torch.float32, device=device)
+    old_values = torch.tensor(body["values"], dtype=torch.float32, device=device)
+    rewards = torch.tensor(body["rewards"], dtype=torch.float32, device=device)
+    dones = torch.tensor(body["dones"], dtype=torch.float32, device=device)
+    bootstrap = float(body.get("bootstrap", 0.0))
 
     with torch.no_grad():
         adv = torch.zeros(n, device=device)
         gae = 0.0
         for t in range(n - 1, -1, -1):
-            nxt = body.bootstrap if t == n - 1 else float(old_values[t + 1])
+            nxt = bootstrap if t == n - 1 else float(old_values[t + 1])
             mask = 1.0 - float(dones[t])
             delta = float(rewards[t]) + GAMMA * nxt * mask - float(old_values[t])
             gae = delta + GAMMA * LAMBDA * mask * gae
@@ -210,7 +190,7 @@ def update(body: UpdateIn):
 
     entropy = torch.zeros((), device=device)
     with lock:
-        h0 = hidden_tensor(body.h0, model.width)
+        h0 = hidden_tensor(body.get("h0"), model.width)
         for _ in range(EPOCHS):
             hidden = None if h0 is None else h0.detach()
             logits_all = []
@@ -240,9 +220,56 @@ def update(body: UpdateIn):
     return {"updates": updates, "entropy": float(entropy.detach().cpu())}
 
 
-@app.post("/reset")
-def reset():
-    return {"ok": True}
+class Handler(BaseHTTPRequestHandler):
+    def _cors(self) -> None:
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "content-type")
+
+    def _send(self, code: int, payload: dict) -> None:
+        body = json.dumps(payload).encode()
+        self.send_response(code)
+        self._cors()
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_OPTIONS(self) -> None:
+        self.send_response(204)
+        self._cors()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_GET(self) -> None:
+        if self.path.split("?", 1)[0] == "/health":
+            self._send(200, health())
+        else:
+            self._send(404, {"error": "not found"})
+
+    def do_POST(self) -> None:
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            body = json.loads(raw.decode() or "{}")
+        except json.JSONDecodeError:
+            self._send(400, {"error": "bad json"})
+            return
+        path = self.path.split("?", 1)[0]
+        try:
+            if path == "/act":
+                self._send(200, act(body))
+            elif path == "/update":
+                self._send(200, update(body))
+            elif path == "/reset":
+                self._send(200, {"ok": True})
+            else:
+                self._send(404, {"error": "not found"})
+        except Exception as exc:
+            self._send(500, {"error": str(exc)})
+
+    def log_message(self, fmt: str, *args) -> None:
+        print("[trainer]", self.address_string(), fmt % args)
 
 
 def main() -> None:
@@ -255,8 +282,10 @@ def main() -> None:
     apply_checkpoint()
     n = param_count(model)
     cap = f"{vram_cap / 1024**2:.0f} MB cap" if device.type == "cuda" else "cpu"
-    print(f"[trainer] {gpu_name} width {width} params {n/1e6:.1f}M {cap}")
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8010")), log_level="info")
+    port = int(os.environ.get("PORT", "8010"))
+    print(f"[trainer] {gpu_name} width {width} params {n / 1e6:.1f}M {cap}")
+    print(f"[trainer] listening on 0.0.0.0:{port}")
+    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
 
 
 if __name__ == "__main__":

@@ -77,9 +77,10 @@ On `192.168.86.35`, next to the existing Ollama:
 
 ```bash
 pip install torch --index-url https://download.pytorch.org/whl/cu126
-pip install -r trainer/requirements.txt
 python trainer/server.py
 ```
+
+Python 3.14 is fine. Do not `pip install -r trainer/requirements.txt`. That file used to pin an old Pydantic which cannot build on 3.14. The trainer no longer needs it.
 
 Or, on that same machine: `docker compose --profile gpu up --build trainer`.
 

@@ -1,3 +1,2 @@
-fastapi==0.115.6
-uvicorn==0.34.0
-pydantic==2.10.4
+# PyTorch is installed separately so the CUDA build matches the driver.
+# Do not pin Pydantic here: Python 3.14 cannot compile the old wheel.
