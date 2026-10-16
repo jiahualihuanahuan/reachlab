@@ -133,7 +133,13 @@ export function YellowLab() {
       if (saved.url && saved.url !== "http://127.0.0.1:11434") setUrl(saved.url);
       if (saved.model) setModel(saved.model);
       if (saved.elites) setElites(saved.elites);
-      if (saved.trainer && saved.trainer !== "http://192.168.86.35:8090") setTrainerUrl(saved.trainer);
+      if (
+        saved.trainer &&
+        saved.trainer !== "http://192.168.86.35:8090" &&
+        saved.trainer !== "http://192.168.86.35:8010"
+      ) {
+        setTrainerUrl(saved.trainer);
+      }
     } catch {
       /* ignore a bad save */
     }
@@ -729,6 +735,13 @@ export function YellowLab() {
                   onChange={(e) => setTrainerUrl(e.target.value)}
                 />
               </label>
+              <p className="text-paper-dim">
+                The browser was sending HTTPS. Open{" "}
+                <a className="text-amber underline" href={trainerUrl + "/health"} target="_blank" rel="noreferrer">
+                  {trainerUrl}/health
+                </a>{" "}
+                once and choose Continue on the certificate warning. Then come back and leave GPU on.
+              </p>
               <label className="block text-xs text-sage">
                 Ollama URL
                 <input

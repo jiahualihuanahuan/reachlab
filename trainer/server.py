@@ -6,6 +6,9 @@ The only install is PyTorch.
 
 import json
 import os
+import socket
+import ssl
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Optional
@@ -272,6 +275,61 @@ class Handler(BaseHTTPRequestHandler):
         print("[trainer]", self.address_string(), fmt % args)
 
 
+def ensure_cert() -> tuple[str, str]:
+    folder = os.path.join(os.path.dirname(__file__), "certs")
+    os.makedirs(folder, exist_ok=True)
+    cert = os.path.join(folder, "cert.pem")
+    key = os.path.join(folder, "key.pem")
+    if os.path.exists(cert) and os.path.exists(key):
+        return cert, key
+    san = os.environ.get("TRAINER_SAN", "IP:192.168.86.35,IP:127.0.0.1,DNS:localhost,DNS:james")
+    subprocess.check_call(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            key,
+            "-out",
+            cert,
+            "-days",
+            "825",
+            "-subj",
+            "/CN=reachlab",
+            "-addext",
+            f"subjectAltName={san}",
+        ]
+    )
+    return cert, key
+
+
+class DualServer(ThreadingHTTPServer):
+    """Plain HTTP, or TLS when the browser upgrades the connection."""
+
+    def __init__(self, addr, handler, context: ssl.SSLContext):
+        super().__init__(addr, handler)
+        self.ssl_context = context
+
+    def get_request(self):
+        sock, addr = super().get_request()
+        try:
+            peek = sock.recv(1, socket.MSG_PEEK)
+        except OSError:
+            return sock, addr
+        if peek[:1] != b"\x16":
+            return sock, addr
+        try:
+            sock = self.ssl_context.wrap_socket(sock, server_side=True)
+        except ssl.SSLError as exc:
+            print(f"[trainer] {addr[0]} TLS closed before the page trusted the certificate ({exc.reason})")
+            sock.close()
+            raise OSError(exc.reason) from exc
+        return sock, addr
+
+
 def main() -> None:
     global model, opt
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -283,9 +341,13 @@ def main() -> None:
     n = param_count(model)
     cap = f"{vram_cap / 1024**2:.0f} MB cap" if device.type == "cuda" else "cpu"
     port = int(os.environ.get("PORT", "8010"))
+    cert, key = ensure_cert()
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(cert, key)
     print(f"[trainer] {gpu_name} width {width} params {n / 1e6:.1f}M {cap}")
-    print(f"[trainer] listening on 0.0.0.0:{port}")
-    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+    print(f"[trainer] listening on 0.0.0.0:{port} (http and https)")
+    print(f"[trainer] open https://192.168.86.35:{port}/health once and continue past the certificate warning")
+    DualServer(("0.0.0.0", port), Handler, ctx).serve_forever()
 
 
 if __name__ == "__main__":

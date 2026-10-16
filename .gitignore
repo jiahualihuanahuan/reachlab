@@ -19,6 +19,7 @@ artifacts/
 *.gb
 *.sav
 trainer/checkpoints/
+trainer/certs/
 __pycache__/
 *.pyc
 .vercel/
