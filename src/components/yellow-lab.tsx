@@ -5,6 +5,7 @@ import { Curiosity, readField, type FieldView, type RewardPart } from "@/game/fi
 import { ACTION_NAMES, Instinct } from "@/game/instinct";
 import { askQwen, fieldBrief, modelfile, type Elite } from "@/game/qwen";
 
+const OLLAMA = "http://192.168.86.35:11434";
 const HOLD = 8;
 const GAP = 2;
 const ROLLOUT = 28;
@@ -99,7 +100,7 @@ export function YellowLab() {
   const [updates, setUpdates] = useState(0);
   const [episodeReturn, setEpisodeReturn] = useState(0);
   const [best, setBest] = useState(0);
-  const [url, setUrl] = useState("http://127.0.0.1:11434");
+  const [url, setUrl] = useState(OLLAMA);
   const [model, setModel] = useState("qwen3.5:9b");
   const [elites, setElites] = useState<Elite[]>([]);
   const [guideNote, setGuideNote] = useState("Guide is idle.");
@@ -117,7 +118,7 @@ export function YellowLab() {
       const saved = JSON.parse(raw) as Store;
       if (saved.weights?.length) instinctRef.current.import(Float32Array.from(saved.weights));
       if (saved.best) setBest(saved.best);
-      if (saved.url) setUrl(saved.url);
+      if (saved.url && saved.url !== "http://127.0.0.1:11434") setUrl(saved.url);
       if (saved.model) setModel(saved.model);
       if (saved.elites) setElites(saved.elites);
     } catch {
@@ -668,7 +669,7 @@ export function YellowLab() {
               <p>How to operate: load the cartridge, wait until the bedroom accepts input, then Train. The instinct holds a direction for a few frames and releases, because menus ignore a stuck button. Dialogue locks force A and those steps are not trained. Reset returns to the bedroom checkpoint without wiping the map memory. Your arrow keys override the policy.</p>
               <p>Rewards: new ground +0.55, retrace −0.02, new area +8, each new owned dex entry +18, seen +3.5, badge +20, new bag item +4, level +1.6, friendship +0.35, a battle HP drop +0.7, blackout −12, step −0.01.</p>
               <p>The 10 GB card cannot backprop a 9B model. Qwen 3.5 9B stays frozen in Ollama as a guide. The instinct is a tiny network in the browser. Distill by downloading the Modelfile (`ollama create reachlab -f Reachlab.Modelfile`). One model only. Context 2048. Do not load a second copy.</p>
-              <p>Point the guide at the machine running Ollama. Start it with origins open so the page can call it: <span className="text-paper">OLLAMA_ORIGINS=*</span> then <span className="text-paper">ollama run qwen3.5:9b</span>. Q4 is about 6 GB. If the test fails, the error is shown as-is.</p>
+              <p>Point the guide at the Ollama already running on the LAN: <span className="text-paper">http://192.168.86.35:11434</span>, model <span className="text-paper">qwen3.5:9b</span>. That copy is only queried. Its weights are not updated. The server must be started with <span className="text-paper">OLLAMA_ORIGINS=*</span> or the browser will be refused. If the test fails, the error is shown as-is.</p>
             </div>
           )}
         </section>

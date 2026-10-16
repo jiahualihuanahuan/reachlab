@@ -6,7 +6,7 @@ The cartridge is not in this repo. Use a ROM you legally own. Do not commit it.
 
 ## Docker Compose
 
-Needs Docker Compose v2 and, for the guide, the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) so the RTX 3080 is visible (`nvidia-smi` works inside Docker).
+Needs Docker Compose v2. The guide calls the Ollama you already run at `http://192.168.86.35:11434`. Compose does not start a second model, and it does not change `qwen3.5:9b`.
 
 ```bash
 mkdir -p roms
@@ -17,12 +17,9 @@ docker compose up --build
 Open http://localhost:8080.
 
 - `web` serves the lab on port 8080 and reads `/roms/yellow.gbc`.
-- `ollama` serves `http://127.0.0.1:11434` with `OLLAMA_ORIGINS=*` so the page can call it. The model lives in the `ollama` volume.
-- `ollama-pull` runs once and pulls `qwen3.5:9b` (about 6 GB, Q4). The lab works before that finishes. Training does not need it. The guide does.
+- The guide defaults to `http://192.168.86.35:11434` and model `qwen3.5:9b`. That server is only queried. Start it with `OLLAMA_ORIGINS=*` so the browser may call it.
 
-If `docker compose up` fails on `gpus: all`, the GPU runtime is missing. Install the toolkit and restart Docker, or delete the `gpus: all` line to run Ollama on CPU (too slow for 9B).
-
-No database. Policy weights stay in the browser (`localStorage` key `reachlab-yellow-v1`), not in the container.
+No database. Policy weights stay in the browser (`localStorage` key `reachlab-yellow-v1`), not in the container. The 9B weights stay where they are.
 
 ### Without Docker
 
@@ -33,14 +30,7 @@ npm install
 npm run dev
 ```
 
-Then open http://localhost:8080 and use **Choose file**. The server ROM path is `ROM_PATH` (default inside this sandbox only).
-
-Ollama on the host, if you want the guide:
-
-```bash
-OLLAMA_ORIGINS='*' ollama serve
-ollama pull qwen3.5:9b
-```
+Then open http://localhost:8080 and use **Choose file**. The server ROM path is `ROM_PATH` (default inside this sandbox only). The guide still calls `http://192.168.86.35:11434`.
 
 ## How to train
 
@@ -80,22 +70,19 @@ Dialogue and other locks force A. Those steps are not trained. The useful run is
 
 ### Qwen guide (optional, not backprop)
 
-On a 10 GB card, keep a single Q4 copy. Do not load a second model.
+On a 10 GB card, keep the single Q4 copy you already have. Do not load a second model. Reachlab does not write to it.
 
-1. Wait until `ollama-pull` has finished (`docker compose logs ollama-pull`).
-2. **Train** tab: URL `http://127.0.0.1:11434`, model `qwen3.5:9b`.
-3. **Test guide**. It should answer with one action. If it fails, the error is shown as-is (usually CORS or the model still pulling).
+1. On `192.168.86.35`, Ollama must already be serving `qwen3.5:9b` and must allow the browser: `OLLAMA_ORIGINS='*'`.
+2. **Train** tab: URL `http://192.168.86.35:11434`, model `qwen3.5:9b`. Those are the defaults.
+3. **Test guide**. It should answer with one action. A failure is usually CORS, or this page being on HTTPS while Ollama is HTTP.
 4. **Guide on**. About every sixth decision the frozen model can replace the instinct's next action. Its prompt includes the best episodes seen so far.
-5. **Download Modelfile**. Then, from the directory that contains `Reachlab.Modelfile`:
+5. **Download Modelfile** only if you want a separate tag with those notes. It does not modify `qwen3.5:9b`:
 
 ```bash
-docker compose cp Reachlab.Modelfile ollama:/tmp/Reachlab.Modelfile
-docker compose exec ollama ollama create reachlab -f /tmp/Reachlab.Modelfile
+OLLAMA_HOST=http://192.168.86.35:11434 ollama create reachlab -f Reachlab.Modelfile
 ```
 
-If Ollama is running on the host instead of in Compose: `ollama create reachlab -f Reachlab.Modelfile`.
-
-Point the model field at `reachlab` afterward. That bakes the elite notes into the system prompt. It still does not train the 9B weights.
+Leave the model field on `qwen3.5:9b` if you do not want that extra tag.
 
 ## Layout
 
