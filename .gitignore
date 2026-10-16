@@ -19,6 +19,8 @@ artifacts/
 *.gb
 *.sav
 trainer/checkpoints/
+__pycache__/
+*.pyc
 .vercel/
 .node_modules.lock
 .project_id
