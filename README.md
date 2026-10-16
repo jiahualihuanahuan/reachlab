@@ -76,7 +76,7 @@ Qwen stays loaded. The policy is a separate recurrent network (GRU, width 2560, 
 On `192.168.86.35`, next to the existing Ollama:
 
 ```bash
-pip install torch --index-url https://download.pytorch.org/whl/cu124
+pip install torch --index-url https://download.pytorch.org/whl/cu126
 pip install -r trainer/requirements.txt
 python trainer/server.py
 ```
