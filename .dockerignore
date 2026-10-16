@@ -1,0 +1,16 @@
+node_modules
+.output
+dist
+.git
+attachments
+screenshots
+artifacts
+roms
+*.gbc
+*.gb
+*.sav
+.grok/skills
+.grok/references
+.grok/preview.log
+.env
+.env.*
