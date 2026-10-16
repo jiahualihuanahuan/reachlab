@@ -4,11 +4,13 @@ import { Cartridge, NO_BUTTONS, type Buttons } from "@/game/gb";
 import { Curiosity, readField, type FieldView, type RewardPart } from "@/game/field";
 import { ACTION_NAMES, Instinct } from "@/game/instinct";
 import { askQwen, fieldBrief, modelfile, type Elite } from "@/game/qwen";
+import { TRAINER, gpuAct, gpuHealth, gpuReset, gpuUpdate, type GpuSample } from "@/game/gpu";
 
 const OLLAMA = "http://192.168.86.35:11434";
 const HOLD = 8;
 const GAP = 2;
 const ROLLOUT = 28;
+const GPU_ROLLOUT = 64;
 const STORE = "reachlab-yellow-v1";
 
 type Store = {
@@ -17,6 +19,7 @@ type Store = {
   url?: string;
   model?: string;
   elites?: Elite[];
+  trainer?: string;
 };
 
 function buttonOf(action: number, on: boolean): Buttons {
@@ -82,6 +85,12 @@ export function YellowLab() {
     rewards: [] as number[],
     dones: [] as boolean[],
   });
+  const trainerRef = useRef(TRAINER);
+  const gpuOnRef = useRef(false);
+  const gpuHiddenRef = useRef<number[] | null>(null);
+  const gpuH0Ref = useRef<number[] | null>(null);
+  const gpuInflightRef = useRef(false);
+  const gpuReadyRef = useRef<GpuSample | null>(null);
   const episodeRef = useRef(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -105,6 +114,9 @@ export function YellowLab() {
   const [elites, setElites] = useState<Elite[]>([]);
   const [guideNote, setGuideNote] = useState("Guide is idle.");
   const [decision, setDecision] = useState("—");
+  const [trainerUrl, setTrainerUrl] = useState(TRAINER);
+  const [gpuWanted, setGpuWanted] = useState(true);
+  const [gpuInfo, setGpuInfo] = useState("Checking the 3080 trainer…");
   const wakingRef = useRef(false);
   const elitesRef = useRef<Elite[]>([]);
   const urlRef = useRef(url);
@@ -121,6 +133,7 @@ export function YellowLab() {
       if (saved.url && saved.url !== "http://127.0.0.1:11434") setUrl(saved.url);
       if (saved.model) setModel(saved.model);
       if (saved.elites) setElites(saved.elites);
+      if (saved.trainer) setTrainerUrl(saved.trainer);
     } catch {
       /* ignore a bad save */
     }
@@ -133,9 +146,10 @@ export function YellowLab() {
       url,
       model,
       elites,
+      trainer: trainerUrl,
     };
     localStorage.setItem(STORE, JSON.stringify(payload));
-  }, [best, url, model, elites, updates]);
+  }, [best, url, model, elites, updates, trainerUrl]);
 
   useEffect(() => {
     trainRef.current = training;
@@ -262,6 +276,32 @@ export function YellowLab() {
       cart.frames(1, NO_BUTTONS);
       return;
     }
+    if (gpuOnRef.current) {
+      curiosityRef.current.observe(cart, obsRef.current, lastActionRef.current);
+      if (!curiosityRef.current.locked(cart) && !gpuReadyRef.current) {
+        if (!gpuInflightRef.current) {
+          gpuInflightRef.current = true;
+          const obs = Array.from(obsRef.current);
+          const hidden = gpuHiddenRef.current;
+          if (rolloutRef.current.obs.length === 0) gpuH0Ref.current = hidden ? hidden.slice() : null;
+          void gpuAct(trainerRef.current, obs, hidden)
+            .then((sample) => {
+              gpuReadyRef.current = sample;
+            })
+            .catch(() => {
+              gpuOnRef.current = false;
+              setGpuInfo("GPU trainer dropped. Fell back to the small net.");
+            })
+            .finally(() => {
+              gpuInflightRef.current = false;
+            });
+        }
+        phaseRef.current = "hold";
+        phaseLeftRef.current = 1;
+        cart.frames(1, buttonOf(actionRef.current, true));
+        return;
+      }
+    }
     const curiosity = curiosityRef.current;
     const locked = curiosity.locked(cart);
     const result = curiosity.reward(cart);
@@ -284,7 +324,13 @@ export function YellowLab() {
     forcedRef.current = false;
     curiosity.observe(cart, obsRef.current, lastActionRef.current);
     const instinct = instinctRef.current;
-    const sample = instinct.sample(obsRef.current, false);
+    const ready = gpuOnRef.current ? gpuReadyRef.current : null;
+    const sample = ready ?? instinct.sample(obsRef.current, false);
+    if (ready) {
+      gpuReadyRef.current = null;
+      gpuHiddenRef.current = ready.hidden;
+      setEntropy(ready.entropy);
+    }
     let action = sample.action;
     if (guideRef.current && roll.obs.length % 6 === 0) {
       const brief = fieldBrief(readField(cart), result.event);
@@ -309,11 +355,32 @@ export function YellowLab() {
     roll.values.push(sample.value);
     roll.rewards.push(0);
     roll.dones.push(false);
-    if (roll.obs.length >= ROLLOUT) {
-      curiosity.observe(cart, obsRef.current, action);
-      const boot = instinct.sample(obsRef.current, true).value;
-      instinct.update(roll.obs, roll.actions, roll.logp, roll.values, roll.rewards, roll.dones, boot);
+    if (roll.obs.length >= (gpuOnRef.current ? GPU_ROLLOUT : ROLLOUT)) {
+      const boot = ready ? ready.value : instinct.sample(obsRef.current, true).value;
       const ep = episodeRef.current;
+      if (gpuOnRef.current) {
+        const body = {
+          obs: roll.obs.map((row) => Array.from(row)),
+          actions: roll.actions.slice(),
+          logp: roll.logp.slice(),
+          values: roll.values.slice(),
+          rewards: roll.rewards.slice(),
+          dones: roll.dones.slice(),
+          h0: gpuH0Ref.current,
+          bootstrap: boot,
+        };
+        void gpuUpdate(trainerRef.current, body)
+          .then((info) => {
+            setUpdates(info.updates);
+            setEntropy(info.entropy);
+          })
+          .catch(() => {
+            setGpuInfo("GPU update failed. The 3080 trainer is still the policy.");
+          });
+      } else {
+        instinct.update(roll.obs, roll.actions, roll.logp, roll.values, roll.rewards, roll.dones, boot);
+        setUpdates(instinct.updates);
+      }
       setReturns((prev) => [...prev, { i: prev.length + 1, r: ep }].slice(-80));
       setBest((prev) => {
         if (ep > prev && ep > 1) {
@@ -338,7 +405,36 @@ export function YellowLab() {
     elitesRef.current = elites;
     urlRef.current = url;
     modelRef.current = model;
-  }, [elites, url, model]);
+    trainerRef.current = trainerUrl;
+  }, [elites, url, model, trainerUrl]);
+
+  useEffect(() => {
+    let stop = false;
+    const tick = () => {
+      void gpuHealth(trainerUrl).then((health) => {
+        if (stop) return;
+        if (!health?.ok) {
+          gpuOnRef.current = false;
+          setGpuInfo("GPU trainer offline. Training the small in-browser net.");
+          return;
+        }
+        gpuOnRef.current = gpuWanted;
+        const million = (health.params / 1e6).toFixed(1);
+        setGpuInfo(
+          gpuWanted
+            ? `${health.gpu} · ${million}M params · cap ${health.vram_cap_mb} MB · ${health.updates} updates`
+            : `${million}M trainer is up, but GPU training is off.`,
+        );
+        if (health.updates) setUpdates(health.updates);
+      });
+    };
+    tick();
+    const id = setInterval(tick, 4000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+  }, [trainerUrl, gpuWanted]);
 
   async function bootRom(bytes: Uint8Array) {
     setStatus("Booting the simulator…");
@@ -419,6 +515,10 @@ export function YellowLab() {
     cart.restore();
     episodeRef.current = 0;
     rolloutRef.current = { obs: [], actions: [], logp: [], values: [], rewards: [], dones: [] };
+    gpuHiddenRef.current = null;
+    gpuReadyRef.current = null;
+    gpuH0Ref.current = null;
+    void gpuReset(trainerRef.current);
     setStatus("Restored the bedroom checkpoint. Curiosity memory stays.");
   }
 
@@ -607,6 +707,7 @@ export function YellowLab() {
                 <Stat k="Updates" v={String(updates)} />
                 <Stat k="Entropy" v={entropy.toFixed(2)} />
               </div>
+              <p className="text-paper-dim">{gpuInfo}</p>
               <p className="text-paper-dim">Last decision {decision}. Tiles {curiosityRef.current.tiles.size} · areas {curiosityRef.current.maps.size}</p>
               <div className="h-36">
                 <ResponsiveContainer width="100%" height="100%">
@@ -620,6 +721,14 @@ export function YellowLab() {
                   </LineChart>
                 </ResponsiveContainer>
               </div>
+              <label className="block text-xs text-sage">
+                Trainer URL
+                <input
+                  className="mt-1 min-h-11 w-full rounded-md border border-line bg-moss px-2 text-sm text-paper"
+                  value={trainerUrl}
+                  onChange={(e) => setTrainerUrl(e.target.value)}
+                />
+              </label>
               <label className="block text-xs text-sage">
                 Ollama URL
                 <input
@@ -637,6 +746,13 @@ export function YellowLab() {
                 />
               </label>
               <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className={`min-h-11 rounded-md px-3 text-sm ${gpuWanted ? "bg-moss-3 text-amber" : "border border-line"}`}
+                  onClick={() => setGpuWanted((v) => !v)}
+                >
+                  {gpuWanted ? "GPU on" : "GPU off"}
+                </button>
                 <button type="button" className="min-h-11 rounded-md bg-amber px-3 text-sm text-ink" onClick={() => void testGuide()}>
                   Test guide
                 </button>
@@ -668,7 +784,7 @@ export function YellowLab() {
               <p>Yellow is a curiosity game with gates. Towns are safe and almost zero-novelty. Routes are chapters. The dex is the long horizon: seeing is progress, catching is the score. Type advantage and remaining HP are the battle economy. Items and money are tension, not loot spam. Friendship on the partner is a slow resource. Blacking out is the real penalty.</p>
               <p>How to operate: load the cartridge, wait until the bedroom accepts input, then Train. The instinct holds a direction for a few frames and releases, because menus ignore a stuck button. Dialogue locks force A and those steps are not trained. Reset returns to the bedroom checkpoint without wiping the map memory. Your arrow keys override the policy.</p>
               <p>Rewards: new ground +0.55, retrace −0.02, new area +8, each new owned dex entry +18, seen +3.5, badge +20, new bag item +4, level +1.6, friendship +0.35, a battle HP drop +0.7, blackout −12, step −0.01.</p>
-              <p>The 10 GB card cannot backprop a 9B model. Qwen 3.5 9B stays frozen in Ollama as a guide. The instinct is a tiny network in the browser. Distill by downloading the Modelfile (`ollama create reachlab -f Reachlab.Modelfile`). One model only. Context 2048. Do not load a second copy.</p>
+              <p>The 10 GB card cannot backprop a 9B model. Qwen 3.5 9B stays frozen. The policy that trains is a recurrent net on the 3080, about 110M parameters when 2.5 GB is free beside Qwen, and it shrinks if VRAM is tighter. Weights stay on that machine. The tiny browser net is only a fallback when the trainer is offline. One Qwen copy. Context 2048.</p>
               <p>Point the guide at the Ollama already running on the LAN: <span className="text-paper">http://192.168.86.35:11434</span>, model <span className="text-paper">qwen3.5:9b</span>. That copy is only queried. Its weights are not updated. The server must be started with <span className="text-paper">OLLAMA_ORIGINS=*</span> or the browser will be refused. If the test fails, the error is shown as-is.</p>
             </div>
           )}

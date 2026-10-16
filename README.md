@@ -18,8 +18,9 @@ Open http://localhost:8080.
 
 - `web` serves the lab on port 8080 and reads `/roms/yellow.gbc`.
 - The guide defaults to `http://192.168.86.35:11434` and model `qwen3.5:9b`. That server is only queried. Start it with `OLLAMA_ORIGINS=*` so the browser may call it.
+- The trained policy is not in the browser. On the 3080 machine, start the trainer (below). The page defaults to `http://192.168.86.35:8090`.
 
-No database. Policy weights stay in the browser (`localStorage` key `reachlab-yellow-v1`), not in the container. The 9B weights stay where they are.
+No database. The small fallback net stays in the browser (`localStorage` key `reachlab-yellow-v1`). The GPU policy is stored on the 3080 in the trainer checkpoint. `qwen3.5:9b` is not modified.
 
 ### Without Docker
 
@@ -68,6 +69,24 @@ What it is rewarded for, read from cartridge RAM:
 
 Dialogue and other locks force A. Those steps are not trained. The useful run is: leave the bedroom, get through the intro, take the partner, then walk new tiles. Towns score almost nothing. New routes, catches, items, and badges are the point.
 
+## Train on the 3080
+
+Qwen stays loaded. The policy is a separate recurrent network (GRU, width 2560, about 110M parameters) that is allowed **2.5 GB** and at most 30% of the card. A Q4 9B model is about 6 GB, so both fit in 10 GB. If less memory is free, the trainer drops to width 1536 or 768 instead of pushing Qwen out.
+
+On `192.168.86.35`, next to the existing Ollama:
+
+```bash
+pip install torch --index-url https://download.pytorch.org/whl/cu124
+pip install -r trainer/requirements.txt
+python trainer/server.py
+```
+
+Or, on that same machine: `docker compose --profile gpu up --build trainer`.
+
+Then press **Train** in the lab. The Train tab should name the GPU and a parameter count in the millions. **GPU on** uses that policy. If the trainer is down, the page falls back to the small net and says so.
+
+The GPU update runs every 64 decisions (PPO, 4 epochs, clip 0.2). Weights are written to `trainer/checkpoints/policy.pt` on the trainer machine. They are too large for `localStorage`.
+
 ### Qwen guide (optional, not backprop)
 
 On a 10 GB card, keep the single Q4 copy you already have. Do not load a second model. Reachlab does not write to it.
@@ -88,7 +107,9 @@ Leave the model field on `qwen3.5:9b` if you do not want that extra tag.
 
 - `src/game/gb.ts` — emulator, joypad, save state
 - `src/game/field.ts` — RAM observation and rewards
-- `src/game/instinct.ts` — PPO network
+- `src/game/instinct.ts` — small fallback PPO network
+- `src/game/gpu.ts` — client for the 3080 trainer
+- `trainer/server.py` — recurrent policy and PPO update
 - `src/game/qwen.ts` — Ollama client and Modelfile
 - `src/components/yellow-lab.tsx` — lab UI
 - `src/routes/api/rom.ts` — serves `ROM_PATH` when the file is present

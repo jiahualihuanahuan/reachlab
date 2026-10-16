@@ -10,3 +10,19 @@ services:
     volumes:
       - ./roms:/roms:ro
     restart: unless-stopped
+
+  trainer:
+    profiles: ["gpu"]
+    build: ./trainer
+    ports:
+      - "8090:8090"
+    environment:
+      CHECKPOINT: /checkpoints/policy.pt
+      VRAM_BUDGET_GB: "2.5"
+    volumes:
+      - trainer:/checkpoints
+    gpus: all
+    restart: unless-stopped
+
+volumes:
+  trainer:

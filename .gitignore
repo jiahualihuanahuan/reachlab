@@ -18,6 +18,7 @@ artifacts/
 *.gbc
 *.gb
 *.sav
+trainer/checkpoints/
 .vercel/
 .node_modules.lock
 .project_id
