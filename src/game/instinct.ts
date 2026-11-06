@@ -159,7 +159,7 @@ export class Instinct {
       for (let a = 0; a < ACT; a++) dLogit[a] = gLog * ((a === actions[s] ? 1 : 0) - fwd.p[a]);
       const hEnt = -fwd.p.reduce((acc, pi) => (pi > 1e-8 ? acc + pi * Math.log(pi) : acc), 0);
       for (let a = 0; a < ACT; a++) {
-        dLogit[a] += 0.02 * fwd.p[a] * (Math.log(fwd.p[a] + 1e-8) + hEnt);
+        dLogit[a] += 0.08 * fwd.p[a] * (Math.log(fwd.p[a] + 1e-8) + hEnt);
       }
       const dV = 0.5 * (fwd.value - ret[s]);
       const dH2 = new Float32Array(H);

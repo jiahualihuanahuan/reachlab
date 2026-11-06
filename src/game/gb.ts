@@ -132,17 +132,21 @@ export class Cartridge {
     const m = this.mod;
     if (!m) return 0;
     let frame = 0;
+    let bedroom = false;
     for (; frame < 9000; frame++) {
       const b = { ...NO_BUTTONS };
-      if (frame === 450) b.start = true;
-      else if (frame > 500 && frame % 36 === 0) b.a = true;
+      if (!bedroom) {
+        if (frame === 450) b.start = true;
+        else if (frame > 500 && frame % 36 === 0) b.a = true;
+      }
       this.frames(1, b);
+      if (frame > 2000 && this.read(0xcfca) === 1 && this.read(0xd35d) === 0x26) bedroom = true;
       if (frame > 2000 && frame % 20 === 0) {
         onProgress(frame);
-        if (this.read(0xcfca) === 1 && this.read(0xd35d) === 0x26) break;
+        if (bedroom && this.read(0xc109) !== 0) break;
       }
     }
-    this.frames(2, NO_BUTTONS);
+    this.frames(8, NO_BUTTONS);
     this.checkpoint = this.capture();
     return frame;
   }

@@ -124,25 +124,38 @@ export function YellowLab() {
   const uiRef = useRef(0);
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORE);
-      if (!raw) return;
-      const saved = JSON.parse(raw) as Store;
-      if (saved.weights?.length) instinctRef.current.import(Float32Array.from(saved.weights));
-      if (saved.best) setBest(saved.best);
-      if (saved.url && saved.url !== "http://127.0.0.1:11434") setUrl(saved.url);
-      if (saved.model) setModel(saved.model);
-      if (saved.elites) setElites(saved.elites);
-      if (
-        saved.trainer &&
-        saved.trainer !== "http://192.168.86.35:8090" &&
-        saved.trainer !== "http://192.168.86.35:8010"
-      ) {
-        setTrainerUrl(saved.trainer);
+    let stop = false;
+    void (async () => {
+      try {
+        const raw = localStorage.getItem(STORE);
+        const saved = raw ? (JSON.parse(raw) as Store) : null;
+        if (saved?.weights?.length) instinctRef.current.import(Float32Array.from(saved.weights));
+        else {
+          const res = await fetch("/instinct.json");
+          if (res.ok) {
+            const trained = (await res.json()) as { weights?: number[] };
+            if (trained.weights?.length) instinctRef.current.import(Float32Array.from(trained.weights));
+          }
+        }
+        if (stop || !saved) return;
+        if (saved.best) setBest(saved.best);
+        if (saved.url && saved.url !== "http://127.0.0.1:11434") setUrl(saved.url);
+        if (saved.model) setModel(saved.model);
+        if (saved.elites) setElites(saved.elites);
+        if (
+          saved.trainer &&
+          saved.trainer !== "http://192.168.86.35:8090" &&
+          saved.trainer !== "http://192.168.86.35:8010"
+        ) {
+          setTrainerUrl(saved.trainer);
+        }
+      } catch {
+        /* ignore a bad save */
       }
-    } catch {
-      /* ignore a bad save */
-    }
+    })();
+    return () => {
+      stop = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -457,16 +470,20 @@ export function YellowLab() {
       await new Promise((r) => setTimeout(r, 30));
       const ctx = canvasRef.current?.getContext("2d", { alpha: false });
       let frame = 0;
+      let bedroom = false;
       const slice = () =>
         new Promise<void>((resolve) => {
           const run = () => {
             const end = Math.min(frame + 180, 9000);
             for (; frame < end; frame++) {
               const b = { ...NO_BUTTONS };
-              if (frame === 450) b.start = true;
-              else if (frame > 500 && frame % 36 === 0) b.a = true;
+              if (!bedroom) {
+                if (frame === 450) b.start = true;
+                else if (frame > 500 && frame % 36 === 0) b.a = true;
+              }
               cart.frames(1, b);
-              if (frame > 2000 && cart.read(0xcfca) === 1 && cart.read(0xd35d) === 0x26) {
+              if (frame > 2000 && cart.read(0xcfca) === 1 && cart.read(0xd35d) === 0x26) bedroom = true;
+              if (bedroom && cart.read(0xc109) !== 0) {
                 resolve();
                 return;
               }
